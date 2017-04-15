@@ -135,28 +135,49 @@ public enum Result<T> {
     }
 }
 
-func performRequest(_ request: URLRequest, completionHandler: @escaping (Result<NSDictionary>) -> ()) {
-    NSURLConnection.sendAsynchronousRequest(request, queue: .main) { (response, data, error) in
+let sharedURLSession: URLSession = {
+    #if os(macOS)
+        return URLSession.shared
+    #elseif os(Linux)
+        let configuration = URLSessionConfiguration()
+        return URLSession(configuration: configuration)
+    #endif
+}()
+
+func performRequest(_ request: URLRequest, completionHandler: @escaping (Result<[String: Any]>) -> ()) {
+    let task = sharedURLSession.dataTask(with: request) { (data, response, error) in
         if let error = error {
             return completionHandler(.error(error))
         }
-        let json: NSDictionary
-        do {
-            json = try JSONSerialization.jsonObject(with: data!, options: []) as! NSDictionary
-        } catch {
-            return completionHandler(.error(error))
+        guard
+            let data = data,
+            let json = (try? JSONSerialization.jsonObject(with: data, options: [])) as? [String: Any],
+            let status = json["status"] as? [String: Any] else
+        {
+            return completionHandler(.error(ICYError.error("Deserialization error")))
         }
-        let status = json.object(forKey: "status") as! NSDictionary
-        guard status.object(forKey: "code") as! Int == 200 else {
-            return completionHandler(.error(ICYError.error(status.object(forKey: "message") as! String)))
+        guard status["code"] as? Int == 200 else {
+            return completionHandler(.error(ICYError.error(status["message"] as? String ?? "Unspecified error")))
         }
         return completionHandler(.success(json))
     }
+    task.resume()
 }
 
 func validateStatus(_ status: ThermostatStatus) throws -> ThermostatStatus {
     guard status.lastSeen.timeIntervalSinceNow > -600 else { throw ICYError.offlineSince(status.lastSeen) }
     return status
+}
+
+// JSON deserialization on Linux (Swift 3.1) returns integer if the
+// wire-format doesn't include a decimal separator. So we need to take
+// care of this. https://bugs.swift.org/browse/SR-4599
+func doubleFromJSON(_ value: Any) -> Double {
+    switch value {
+    case let value as Double: return value
+    case let value as Int: return Double(value)
+    default: fatalError("Could not cast \(type(of: value)) to Double")
+    }
 }
 
 public struct Session {
@@ -172,13 +193,13 @@ public struct Session {
             switch result {
             case .success(let json):
                 let status = ThermostatStatus(
-                    uid: json.object(forKey: "uid") as! String,
-                    firstSeen: dateFormatter.date(from: json.object(forKey: "first-seen") as! String)!,
-                    lastSeen: dateFormatter.date(from: json.object(forKey: "last-seen") as! String)!,
-                    currentTemperature: json.object(forKey: "temperature2") as! Double,
-                    desiredTemperature: json.object(forKey: "temperature1") as! Double,
-                    schedule: (json.object(forKey: "week-clock") as! [Int]).flatMap { ThermostatTimeSwitch(rawValue: $0) },
-                    configuration: json.object(forKey: "configuration") as! [Int])
+                    uid: json["uid"] as! String,
+                    firstSeen: dateFormatter.date(from: json["first-seen"] as! String)!,
+                    lastSeen: dateFormatter.date(from: json["last-seen"] as! String)!,
+                    currentTemperature: doubleFromJSON(json["temperature2"]!),
+                    desiredTemperature: doubleFromJSON(json["temperature1"]!),
+                    schedule: (json["week-clock"] as! [Int]).flatMap { ThermostatTimeSwitch(rawValue: $0) },
+                    configuration: json["configuration"] as! [Int])
                 completionHandler(.success(status))
 
             case .error(let error):
@@ -208,7 +229,7 @@ public struct Session {
 }
 
 public func login(username: String, password: String, completionHandler: @escaping (Result<Session>) -> ()) {
-    let request = NSMutableURLRequest(url: URL(string: "https://portal.icy.nl/login")!)
+    var request = URLRequest(url: URL(string: "https://portal.icy.nl/login")!)
     request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
     request.httpMethod = "POST"
     request.httpBody = "username=\(username)&password=\(password)&remember=1".data(using: String.Encoding.ascii, allowLossyConversion: false)
@@ -216,10 +237,10 @@ public func login(username: String, password: String, completionHandler: @escapi
         switch result {
         case .success(let json):
             let session = Session(
-                name: (json.object(forKey: "name") as! String, json.object(forKey: "preposition") as! String, json.object(forKey: "lastname") as! String),
-                username: json.object(forKey: "username") as! String,
-                token: json.object(forKey: "token") as! String,
-                email: json.object(forKey: "email") as! String)
+                name: (json["name"] as! String, json["preposition"] as! String, json["lastname"] as! String),
+                username: json["username"] as! String,
+                token: json["token"] as! String,
+                email: json["email"] as! String)
             completionHandler(.success(session))
         case .error(let error):
             completionHandler(.error(error))
