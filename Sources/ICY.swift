@@ -94,21 +94,31 @@ public struct ThermostatStatus {
             switch value {
             case .away:
                 configuration[0] = 0
-                desiredTemperature = Double(configuration[4] / 2)
+                desiredTemperature = defaultAwayTemperature
             case .comfort:
                 configuration[0] = 32
-                desiredTemperature = Double(configuration[6] / 2)
+                desiredTemperature = defaultComfortTemperature
             case .saving:
                 configuration[0] = 64
-                desiredTemperature = Double(configuration[5] / 2)
+                desiredTemperature = defaultSavingTemperature
             case .fixed:
                 configuration[0] = 160
+                desiredTemperature = defaultAwayTemperature
             }
         }
     }
 
     public var isHeating: Bool {
         return configuration[0] & 4 == 4
+    }
+    public var defaultComfortTemperature: Double {
+        return Double(configuration[6] / 2)
+    }
+    public var defaultAwayTemperature: Double {
+        return Double(configuration[4] / 2)
+    }
+    public var defaultSavingTemperature: Double {
+        return Double(configuration[5] / 2)
     }
 }
 
