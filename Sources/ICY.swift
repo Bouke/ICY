@@ -208,7 +208,7 @@ public struct Session {
                     lastSeen: dateFormatter.date(from: json["last-seen"] as! String)!,
                     currentTemperature: doubleFromJSON(json["temperature2"]!),
                     desiredTemperature: doubleFromJSON(json["temperature1"]!),
-                    schedule: (json["week-clock"] as! [Int]).flatMap { ThermostatTimeSwitch(rawValue: $0) },
+                    schedule: (json["week-clock"] as! [Int]).compactMap { ThermostatTimeSwitch(rawValue: $0) },
                     configuration: json["configuration"] as! [Int])
                 completionHandler(.success(status))
 
@@ -230,7 +230,7 @@ public struct Session {
         performRequest(request) { result in
             switch result {
             case .success(_):
-                completionHandler(.success())
+                completionHandler(.success(()))
             case .error(let error):
                 completionHandler(.error(error))
             }
