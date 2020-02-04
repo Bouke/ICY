@@ -162,17 +162,31 @@ func performRequest(_ request: URLRequest, completionHandler: @escaping (Result<
         if let error = error {
             return completionHandler(.error(error))
         }
-        guard
-            let data = data,
-            let json = (try? JSONSerialization.jsonObject(with: data, options: [])) as? [String: Any],
-            let status = json["status"] as? [String: Any] else
-        {
-            return completionHandler(.error(ICYError.error("Deserialization error")))
+        guard let httpResponse = response as? HTTPURLResponse else {
+            return completionHandler(.error(ICYError.error("Invalid response type: \(response.debugDescription)")))
         }
-        guard status["code"] as? Int == 200 else {
-            return completionHandler(.error(ICYError.error(status["message"] as? String ?? "Unspecified error")))
+        guard let data = data else {
+            return completionHandler(.error(ICYError.error("No data returned")))
         }
-        return completionHandler(.success(json))
+        guard httpResponse.statusCode == 200 else {
+            let body = String(data: data, encoding: .utf8)
+            return completionHandler(.error(ICYError.error("Invalid status code: \(httpResponse.statusCode), body: \(body ?? "n/a")")))
+        }
+        do {
+            let anyJson = try JSONSerialization.jsonObject(with: data, options: [])
+            guard
+                let json = anyJson as? [String: Any],
+                let status = json["status"] as? [String: Any] else
+            {
+                return completionHandler(.error(ICYError.error("Unexpected json structure returned")))
+            }
+            guard status["code"] as? Int == 200 else {
+                return completionHandler(.error(ICYError.error(status["message"] as? String ?? "Unspecified error")))
+            }
+            return completionHandler(.success(json))
+        } catch {
+            return completionHandler(.error(ICYError.error("Deserialization error: \(error)")))
+        }
     }
     task.resume()
 }
